@@ -200,32 +200,3 @@ dt[,c("numberofemployees","annual_revenue_usd"):=NULL]
 # Save dt
 saveRDS(dt, "./Data/dt.RDS")
 
-
-
-
-
-
-
-
-
-
-# Extra Filters -----------------------------------------------------------
-# accountTable <- accountTable[is.na(SCRIBE_DELETEDON)]
-# accountTable <- accountTable[(statuscode == 1)]
-# accountTable <- accountTable[(new_mal == 1)]
-# accountTable <- accountTable[(accountid != "09DC5EF2-0020-EA11-A810-000D3AB5D511")]
-# accountTable <- accountTable[(accountid != "FEFD53B6-0020-EA11-A810-000D3AB5D511")]
-# accountTable <- accountTable[(accountid != "A96A7BDA-0020-EA11-A810-000D3AB5D511")]
-# accountTable <- accountTable[(parentaccountid != "09DC5EF2-0020-EA11-A810-000D3AB5D511") | (is.na(parentaccountid))]
-# accountTable <- accountTable[(parentaccountid != "FEFD53B6-0020-EA11-A810-000D3AB5D511") | (is.na(parentaccountid))]
-# accountTable <- accountTable[(parentaccountid != "A96A7BDA-0020-EA11-A810-000D3AB5D511") | (is.na(parentaccountid))]
-# 
-# # Pivot Activity Attributes
-# activityAttributes.pivot <- (dcast(activityAttributes, Activity_id ~ name))
-# 
-# # Contact Table 
-# contactTable <- contactTable[(is.na(SCRIBE_DELETEDON))]
-# contactTable <- contactTable[(statuscode == 1)]
-# contactTable <- contactTable[(accountid != "09DC5EF2-0020-EA11-A810-000D3AB5D511")]
-# contactTable <- contactTable[(accountid != "FEFD53B6-0020-EA11-A810-000D3AB5D511")]
-# contactTable <- contactTable[(accountid != "A96A7BDA-0020-EA11-A810-000D3AB5D511")]
