@@ -1,0 +1,270 @@
+---
+title: "Model Output"
+author: "Nils"
+date: "5/31/2021"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#Load packages
+library("tidymodels")
+library("doParallel")
+library("themis")
+library("xgboost")
+library(data.table)
+library(splitTools)
+library(vip)
+library(gridExtra)
+library(SHAPforxgboost)
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#Prep Data
+# Select Iteration
+iteration <- "1_17"
+
+xgb_final_fit <- readRDS(paste0("./Output/model_",iteration,"/model_",iteration,"_finalfit-2.RDS"))
+xgb_final_wf <- readRDS(paste0("./Output/model_",iteration,"/model_",iteration,"-2.RDS"))
+
+# Get data
+model_dt <- readRDS(paste0("./Data/Modeling Data/dt_",iteration,".RDS"))
+
+id.vars <- c("opportunityid","contactid","accountid")
+Y = "QO"
+model_dt$QO <- factor(model_dt$QO, levels = c("1","0"))
+X.numeric <- names(select_if(model_dt, is.numeric))
+X.factors <- names(model_dt)[!(names(model_dt) %in% c(id.vars,X.numeric,Y))]
+
+splitting <- partition(model_dt$accountid, c(analysis=0.7,assessment=0.3),type="grouped",seed=1998)
+
+split <- make_splits(splitting, model_dt)
+
+model_train <- training(split)
+rm(model_dt, split, splitting)
+
+xgb_recipe <- recipe(QO ~ ., data = model_train) %>%
+  step_dummy(!!!syms(X.factors), one_hot=T) %>%
+  step_rm("accountid","contactid","opportunityid")
+
+baked_data <- xgb_recipe %>% prep() %>% bake(new_data=model_train) %>% select(-c(QO))
+
+# Get XGB model
+xgb_object <- pull_workflow_fit(xgb_final_wf)$fit
+
+```
+
+## Performance Metrics
+### Metrics
+```{r}
+xgb_final_fit %>%
+  collect_metrics()
+```
+
+### Confusion Matrix
+```{r}
+xgb_final_fit %>% collect_predictions() %>% 
+  conf_mat(truth = QO, estimate = .pred_class)
+```
+
+### ROC and Lift Curves
+```{r fig.width=9, fig.height=5}
+roc_curve <- xgb_final_fit %>% collect_predictions() %>% 
+  roc_curve(truth=QO, .pred_1) %>% 
+  autoplot()
+
+lift_curve <- xgb_final_fit %>% collect_predictions() %>% 
+  lift_curve(truth=QO, .pred_1) %>% 
+  autoplot()
+
+grid.arrange(roc_curve, lift_curve, ncol=2)
+```
+
+## Variable Importance 
+### Top 10 Features
+```{r echo=FALSE}
+xgb_final_wf %>%
+  pull_workflow_fit() %>%
+  vip(geom = "col") + theme_bw()
+
+# vip <- xgb_final_wf %>%
+#   pull_workflow_fit() %>%
+#   vi()
+# write.csv(vip, file="./Output/vip.csv")
+
+ggplot(vip[1:10,], aes( x=reorder(Variable,Importance), y=Importance)) +
+  geom_col() +
+  coord_flip() +
+  xlab("Feature") +
+  theme_bw()
+```
+
+### All Features
+```{r echo=FALSE, fig.height=15, fig.width=7}
+# All features (Actually top 2/3rds features)
+nfeatures <- xgb_final_wf$fit$fit$fit$nfeatures #Number of features in model
+
+xgb_final_wf %>%
+  pull_workflow_fit() %>%
+  vip(geom = "col", num_features=ceiling(nfeatures), aesthetics=list(width=0.5)) + theme_bw()
+```
+
+## Partial Dependence Plots
+### Numeric Features
+```{r PDP1, echo=FALSE, fig.height=5, fig.width=8.5, message=FALSE, warning=FALSE}
+for (i in X.numeric) {
+  if (length(unique(baked_data[[i]]))==2) {
+    pred_var_range <- c(0,1)
+    predictions <- data.frame(pred_var=double(),
+                              value=factor(),
+                              mean=double())
+  } else {
+    pred_var_range <- seq(from=min(baked_data[,i],na.rm=T), 
+                          to=max(baked_data[,i],na.rm=T), 
+                          length.out=20)
+    predictions <- data.frame(pred_var=double(),
+                              value=double(),
+                              mean=double())
+  }
+  
+  for (j in pred_var_range) {
+    baked_data_temp <- baked_data
+    baked_data_temp[,i] <- j
+    predict <- predict(xgb_object, as.matrix(baked_data_temp))
+    predictions_temp <- data.frame(pred_var=i,
+                                   value=j,
+                                   mean=mean(predict))
+    predictions <- rbind(predictions, predictions_temp)
+  }
+  if (length(pred_var_range)==2) {
+    predictions$value <- as.factor(predictions$value)
+    plot1 <- ggplot(predictions, aes(x=value, y=mean, group=1)) + 
+      geom_col(fill='skyblue') +
+      geom_hline(aes(yintercept=mean(predictions$mean),linetype="Mean Prediction"), color='red') +
+      theme_bw() +
+      ylab("Predicted QO Probability") +
+      xlab(i) +
+      scale_y_continuous(labels = scales::percent) +
+      ggtitle(paste0("PDP of ",i)) +
+      scale_linetype_manual(name = "", values = c(2, 2), 
+                            guide = guide_legend(override.aes = list(color = c("red")))) +
+      theme(legend.position="bottom")
+    plot2data <- baked_data[,i]
+    names(plot2data) <- "x"
+    plot2 <- ggplot(plot2data, aes(x=as.factor(x))) + 
+      geom_histogram(stat='count') +
+      ylab("Count") +
+      xlab(i) +
+      ggtitle(paste0("Distribution of ",i)) +
+      theme_bw()
+  } else {
+    plot1 <- ggplot(predictions, aes(x=value, y=mean, group=1)) + 
+      geom_col(fill='skyblue') +
+      geom_hline(aes(yintercept=mean(predictions$mean),linetype="Mean Prediction"), color='red') +
+      theme_bw() +
+      ylab("Predicted QO Probability") +
+      xlab(i) +
+      scale_y_continuous(labels = scales::percent) +
+      ggtitle(paste0("PDP of ",i)) +
+      scale_linetype_manual(name = "", values = c(2, 2), 
+                            guide = guide_legend(override.aes = list(color = c("red")))) +
+      theme(legend.position="bottom")
+    
+    plot2 <- ggplot(baked_data[,i], aes_(x=as.name(i))) + 
+      geom_histogram(fill='skyblue') +
+      ylab("Count") +
+      ggtitle(paste0("Distribution of ",i)) +
+      scale_y_continuous(labels = scales::percent) +
+      theme_bw()
+  }
+  
+  grid.arrange(plot1,plot2,ncol=2)
+}
+```
+
+### Categorical Features
+```{r PDP2, echo=FALSE, fig.height=8, fig.width=7, message=FALSE, warning=FALSE}
+for (i in X.factors) {
+    pred_var_range <- unlist(unique(model_train[,..i]))
+    predictions <- data.frame(pred_var=double(),
+                            value=double(),
+                            mean=double(),
+                            lower=double(),
+                            median=double(),
+                            upper=double())  
+  for (j in pred_var_range) {
+    model_train_temp <- model_train
+    model_train_temp[,i] <- j
+    model_train_temp <- model_train_temp %>% select(-c(Y)) 
+    predict <- predict(xgb_final_wf, model_train_temp, type="prob")
+    predict <- predict$.pred_1
+    predictions_temp <- data.frame(pred_var=i,
+                                   value=j,
+                                   mean=mean(predict),
+                                   lower=quantile(predict)[[2]],
+                                   median=quantile(predict)[[3]],
+                                   upper=quantile(predict)[[4]])
+    predictions <- rbind(predictions, predictions_temp)
+  }
+  plot1 <- ggplot(predictions, aes(x=reorder(value, mean), y=mean, group=1)) + 
+    geom_col(fill='skyblue') + 
+    theme_bw() +
+    ylab("Predicted QO Probability") +
+    xlab(i) +
+    scale_y_continuous(labels = scales::percent) +
+    ggtitle(paste0("PDP of ",i)) +
+    geom_hline(aes(yintercept=mean(predictions$mean),linetype="Mean Prediction"), color='red') +
+    coord_flip() +
+    theme(legend.position="top")  +
+    scale_linetype_manual(name = "", values = c(2, 2), 
+                            guide = guide_legend(override.aes = list(color = c("red"))))
+  plot2 <- 
+    ggplot(model_train[,.N,by=i], 
+           aes_string(x=paste0("reorder(",i,", N)"),
+                      y=quote(N))) + 
+    geom_col() +
+    xlab(i) +
+    coord_flip() +
+    ggtitle(paste0("Distribution of ",i)) +
+    theme_bw()
+  grid.arrange(plot1,plot2,nrow=2)
+}
+```
+
+## SHAP Variable Importance
+x-axis is measured in % probability.
+
+```{r SHAP, echo=FALSE, fig.height=15, fig.width=8, message=TRUE, warning=FALSE}
+if (file.exists(paste0("./Output/model_",iteration,"/shap_data.RDS"))) {
+  shap_long <- readRDS(paste0("./Output/model_",iteration,"/shap_data.RDS"))
+  shap_long2 <-
+    shap_long[, .(
+      ID,
+      variable,
+      value = (plogis(value) - 0.5),
+      rfvalue,
+      stdfvalue,
+      mean_value = (plogis(mean_value) - 0.5)
+    )]
+  shap.plot.summary(shap_long2, dilute=5)
+} else {
+  shap_long <-
+    shap.prep(xgb_model = xgb_object,
+              X_train = as.matrix(baked_data),
+              top_n = 30)
+  shap_long2 <-
+    shap_long[, .(
+      ID,
+      variable,
+      value = (plogis(value) - 0.5),
+      rfvalue,
+      stdfvalue,
+      mean_value = (plogis(mean_value) - 0.5)
+    )]
+  saveRDS(shap_long, paste0("./Output/model_",iteration,"/shap_data.RDS"))
+
+  shap.plot.summary(shap_long2, dilute = 5)
+}
+```
+

@@ -1,0 +1,295 @@
+---
+title: "Model Comparison"
+author: "Nils"
+date: "5/24/2021"
+output: html_document
+---
+
+### Load Packages
+hidden
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library("tidymodels")
+library("doParallel")
+library("themis")
+library("xgboost")
+library(data.table)
+library(splitTools)
+library(vip)
+library(gridExtra)
+library(SHAPforxgboost)
+library(readr)
+```
+### Retrieve Model Performance
+hidden
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Read Iterations File
+iterations <- fread("./Output/model-compare.csv")
+model_performance <- NULL
+setDT(model_performance)
+for (i in 1:nrow(iterations)) {
+  iteration <- iterations[i,2]
+  temp <- readRDS(paste0("./Output/model_",iteration,"/model_",iteration,"_finalfit.RDS")) %>% 
+    collect_metrics() %>% 
+    select(-c(".estimator",".config")) %>% 
+    mutate(iteration = paste0("model_",iteration))
+  model_performance <- rbind(model_performance, temp)
+  if (iterations[(i+1),2]=="") {
+    break
+  }
+}
+
+
+#xgb_final_wf <- readRDS(paste0("./Output/model_",iteration,"/model_",iteration,".RDS"))
+```
+
+## Plot Model Iteration Performance
+On test data
+
+### Accuracy
+```{r echo=FALSE, fig.width=8}
+ggplot(model_performance[.metric=="accuracy"], aes(x=reorder(iteration, .estimate), y=.estimate)) +
+  geom_point() +
+  theme_bw() +
+  ggtitle("Accuracy across Model Iterations") +
+  ylab("Estimate") +
+  xlab("Model Iteration") +
+  coord_flip()
+```
+
+### Sensitivity
+```{r echo=FALSE, fig.width=7}
+sens_plot <- ggplot(model_performance[.metric=="sens"], aes(x=reorder(iteration, .estimate), y=.estimate)) +
+  geom_point() +
+  theme_bw() +
+  #ggtitle("Sensitivity across Model Iterations") +
+  ylab("Estimated Sensitivity") +
+  xlab("Model Iteration") +
+  coord_flip()
+
+sens_plot
+```
+
+### Specificity
+```{r echo=FALSE, fig.width=7}
+ggplot(model_performance[.metric=="spec"], aes(x=reorder(iteration, .estimate), y=.estimate)) +
+  geom_point() +
+  theme_bw() +
+  ggtitle("Specificity across Model Iterations") +
+  ylab("Estimate") +
+  xlab("Model Iteration") +
+  coord_flip()
+```
+
+### AUC
+```{r echo=FALSE, fig.width=7}
+auc_plot <- ggplot(model_performance[.metric=="roc_auc"], aes(x=reorder(iteration, .estimate), y=.estimate)) +
+  geom_point() +
+  theme_bw() +
+  #ggtitle("AUC across Model Iterations") +
+  ylab("Estimated AUC") +
+  xlab("Model Iteration") +
+  coord_flip()
+
+auc_plot
+```
+
+### ROC and Lift Curve Comparison Data
+```{r echo=FALSE, fig.width=8}
+roc_performance <- NULL
+lift_performance <- NULL
+
+for (i in 1:nrow(iterations)) {
+  iteration <- iterations[i,2]
+  temp <- readRDS(paste0("./Output/model_",iteration,"/model_",iteration,"_finalfit.RDS")) %>% 
+    collect_predictions() %>% 
+    roc_curve(truth=QO, .pred_0) %>% 
+    mutate(iteration = paste0("model_",iteration))
+  roc_performance <- rbind(roc_performance, temp)
+  if (iterations[(i+1),2]=="") {
+    break
+  }
+
+}
+
+for (i in 1:nrow(iterations)) {
+  iteration <- iterations[i,2]
+  temp <- readRDS(paste0("./Output/model_",iteration,"/model_",iteration,"_finalfit.RDS")) %>% 
+    collect_predictions() %>% 
+    lift_curve(truth=QO, .pred_0) %>% 
+    mutate(iteration = paste0("model_",iteration))
+  lift_performance <- rbind(lift_performance, temp)
+  if (iterations[(i+1),2]=="") {
+    break
+  }
+
+}
+```
+
+
+```{r echo=FALSE, fig.width=8}
+ggplot(roc_performance, aes(x=(1-specificity), y=sensitivity, color=iteration)) +
+  geom_line() +
+  theme_bw() +
+  coord_fixed() +
+  geom_segment(aes(x=0,y=0,xend=1,yend=1),color="darkgray") +
+  ggtitle("ROC Curve across Model Iterations") +
+  xlab("False Positive Rate (1-Specificity)") +
+  ylab("True Positive Rate (Sensitivity)")
+```
+
+### Thesis: Rename model iterations
+```{r}
+#The binary ones
+model_performance[iteration=="model_0",
+                  iteration:="Base Model"]
+model_performance[iteration=="model_1_4",
+                  iteration:="Model 1"]
+model_performance[iteration=="model_1_6",
+                  iteration:="Model 2"]
+model_performance[iteration=="model_1_7",
+                  iteration:="Model 3"]
+model_performance[iteration=="model_1_8",
+                  iteration:="Model 5"]
+model_performance[iteration=="model_1_9",
+                  iteration:="Model 4"]
+model_performance[iteration=="model_1_10",
+                  iteration:="Model 6"]
+#The counts
+model_performance[iteration=="model_1_11",
+                  iteration:="Model 7"]
+model_performance[iteration=="model_1_12",
+                  iteration:="Model 8"]
+model_performance[iteration=="model_1_13",
+                  iteration:="Model 9"]
+model_performance[iteration=="model_1_15",
+                  iteration:="Model 10"]
+model_performance[iteration=="model_1_14",
+                  iteration:="Model 11"]
+model_performance[iteration=="model_1_16",
+                  iteration:="Model 12"]
+
+```
+
+### Thesis: Rename roc model iterations
+```{r}
+setDT(roc_performance)
+roc_performance[iteration=="model_0",
+                  iteration:="Base Model"]
+roc_performance[iteration=="model_1_4",
+                  iteration:="Model 1"]
+roc_performance[iteration=="model_1_6",
+                  iteration:="Model 2"]
+roc_performance[iteration=="model_1_7",
+                  iteration:="Model 3"]
+roc_performance[iteration=="model_1_8",
+                  iteration:="Model 5"]
+roc_performance[iteration=="model_1_9",
+                  iteration:="Model 4"]
+roc_performance[iteration=="model_1_10",
+                  iteration:="Model 6"]
+
+roc_performance[iteration=="model_1_11",
+                  iteration:="Model 7"]
+roc_performance[iteration=="model_1_12",
+                  iteration:="Model 8"]
+roc_performance[iteration=="model_1_13",
+                  iteration:="Model 9"]
+roc_performance[iteration=="model_1_15",
+                  iteration:="Model 10"]
+roc_performance[iteration=="model_1_14",
+                  iteration:="Model 11"]
+roc_performance[iteration=="model_1_16",
+                  iteration:="Model 12"]
+
+```
+
+### Thesis: Rename lift model iterations
+```{r}
+setDT(lift_performance)
+lift_performance[iteration=="model_0",
+                  iteration:="Base Model"]
+lift_performance[iteration=="model_1_4",
+                  iteration:="Model 1"]
+lift_performance[iteration=="model_1_6",
+                  iteration:="Model 2"]
+lift_performance[iteration=="model_1_7",
+                  iteration:="Model 3"]
+lift_performance[iteration=="model_1_8",
+                  iteration:="Model 5"]
+lift_performance[iteration=="model_1_9",
+                  iteration:="Model 4"]
+lift_performance[iteration=="model_1_10",
+                  iteration:="Model 6"]
+
+lift_performance[iteration=="model_1_11",
+                  iteration:="Model 7"]
+lift_performance[iteration=="model_1_12",
+                  iteration:="Model 8"]
+lift_performance[iteration=="model_1_13",
+                  iteration:="Model 9"]
+lift_performance[iteration=="model_1_15",
+                  iteration:="Model 10"]
+lift_performance[iteration=="model_1_14",
+                  iteration:="Model 11"]
+lift_performance[iteration=="model_1_16",
+                  iteration:="Model 12"]
+
+```
+
+Grid of Sensitivity and AUC
+```{r fig.width=8}
+grid.arrange(sens_plot, auc_plot, ncol=2)
+
+
+```
+
+
+
+```{r fig.width=7.3, fig.height=6}
+ggplot(roc_performance, aes(x=(1-specificity), y=sensitivity, color=iteration)) +
+  geom_line() +
+  theme_bw() +
+  coord_fixed() +
+  geom_segment(aes(x=0,y=0,xend=1,yend=1),color="darkgray") +
+  xlab("False Positive Rate (1-Specificity)") +
+  ylab("True Positive Rate (Sensitivity)") +
+  labs(color = "Model Iteration") +
+  scale_color_discrete(limits = c("Base Model", 
+                                 "Model 1",
+                                 "Model 2",
+                                 "Model 3",
+                                 "Model 4",
+                                 "Model 5",
+                                 "Model 6",
+                                 "Model 7",
+                                 "Model 8",
+                                 "Model 9",
+                                 "Model 10",
+                                 "Model 11",
+                                 "Model 12")) +
+  annotate("text",x=0.38, y=0.875, label=c("Model 9"), size=3.1, color="#8288DC") +
+  annotate("text",x=0.38, y=0.98, label=c("Model 3"), size=3.1, color="#a2bb30")
+```
+```{r fig.width=7.3, fig.height=4}
+ggplot(lift_performance, aes(x=.percent_tested, y=.lift, color=iteration)) +
+  geom_line() +
+  theme_bw() +
+  xlab("Percent of Sample (%)") +
+  ylab("Lift") +
+  labs(color = "Model Iteration") +
+  scale_color_discrete(limits = c("Base Model", 
+                                 "Model 1",
+                                 "Model 2",
+                                 "Model 3",
+                                 "Model 4",
+                                 "Model 5",
+                                 "Model 6",
+                                 "Model 7",
+                                 "Model 8",
+                                 "Model 9",
+                                 "Model 10",
+                                 "Model 11",
+                                 "Model 12")) +
+  annotate("text",x=70.5, y=1.155, label=c("Model 9"), size=3.1, color="#8288DC") +
+  annotate("text",x=92, y=1.1, label=c("Model 3"), size=3.1, color="#a2bb30")
+```
