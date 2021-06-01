@@ -21,6 +21,6 @@
 
 - **compare-models**: Reads model results for chosen models, generates file with output to compare models.
 
-
+- **thesis**: Additional code for exploratory analysis. 
 
 
