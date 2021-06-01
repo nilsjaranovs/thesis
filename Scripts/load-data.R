@@ -17,10 +17,10 @@ cat("\f")
 con <- dbConnect(
   odbc(),
   Driver = "ODBC Driver 13 for SQL Server",
-  Server = "fatqtyfkag.database.windows.net",
-  Database = "ISMCRMMirror",
-  UID = "reporting@fatqtyfkag",
-  PWD = "t?6MNa*2"
+  Server = "CENSORED",
+  Database = "CENSORED",
+  UID = "CENSORED",
+  PWD = "CENSORED"
 )
 
 #Account Table
